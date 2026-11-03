@@ -530,6 +530,25 @@ public struct PopoverView: View {
             
             Spacer()
             
+            Button(action: {
+                NSApp.activate(ignoringOtherApps: true)
+                for window in NSApp.windows {
+                    if window.canBecomeMain {
+                        window.makeKeyAndOrderFront(nil)
+                        return
+                    }
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "macwindow")
+                    Text("Main Window")
+                }
+                .font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            
+            Spacer()
+            
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }

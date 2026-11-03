@@ -23,9 +23,9 @@
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     
-    <!-- Hide from Dock: Pure menu-bar app -->
+    <!-- Full macOS Application with Dock icon and main window -->
     <key>LSUIElement</key>
-    <true/>
+    <false/>
     
     <!-- Local Network Privacy Permissions -->
     <key>NSLocalNetworkUsageDescription</key>

@@ -51,6 +51,24 @@ public final class P2PNetworkManager: ObservableObject {
         startBrowsing()
     }
     
+    public func updateReceivedFolder(url: URL) {
+        self.receivedFolderURL = url
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    }
+    
+    public func addTransfer(_ transfer: FileTransferProgress) {
+        activeTransfers.insert(transfer, at: 0)
+    }
+    
+    public func updateTransfer(id: String, bytesTransferred: Int64, isCompleted: Bool = false) {
+        if let idx = activeTransfers.firstIndex(where: { $0.id == id }) {
+            activeTransfers[idx].bytesTransferred = bytesTransferred
+            if isCompleted {
+                activeTransfers[idx].isCompleted = true
+            }
+        }
+    }
+    
     // MARK: - Listener (Bonjour Advertising)
     
     public func startListener(port: UInt16 = defaultPort) {

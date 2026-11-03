@@ -6,8 +6,19 @@ struct WaypointApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
     var body: some Scene {
-        Settings {
-            EmptyView()
+        WindowGroup("Waypoint") {
+            MainWindowView()
+        }
+        .windowStyle(.titleBar)
+        .windowToolbarStyle(.unified)
+        .commands {
+            SidebarCommands()
+            CommandGroup(replacing: .newItem) {
+                Button("Open Downloads Folder") {
+                    NSWorkspace.shared.open(P2PNetworkManager.shared.receivedFolderURL)
+                }
+                .keyboardShortcut("O", modifiers: [.command])
+            }
         }
     }
 }
@@ -19,8 +30,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Enforce accessory activation policy so no icon appears in the macOS Dock
-        NSApp.setActivationPolicy(.accessory)
+        // Run as a regular macOS desktop application with Dock icon and main window
+        NSApp.setActivationPolicy(.regular)
         
         setupPopover()
         setupStatusItem()
@@ -31,6 +42,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = ContinuityManager.shared
         _ = LocalWebServer.shared
         _ = VideoStreamingPipeline.shared
+    }
+    
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            for window in sender.windows {
+                if window.canBecomeMain {
+                    window.makeKeyAndOrderFront(nil)
+                    return true
+                }
+            }
+        }
+        return true
     }
     
     // MARK: - Status Item Setup
@@ -77,7 +100,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func showPopover(button: NSStatusBarButton) {
-        // Bring to front
         NSApp.activate(ignoringOtherApps: true)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
     }
@@ -87,7 +109,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func setupGlobalClickMonitor() {
-        // Dismiss popover if user clicks anywhere outside of it
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self = self, self.popover.isShown else { return }
             self.closePopover()
