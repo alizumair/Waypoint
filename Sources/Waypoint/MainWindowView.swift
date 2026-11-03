@@ -9,29 +9,27 @@ public struct MainWindowView: View {
     @ObservedObject var continuity = ContinuityManager.shared
     @ObservedObject var videoPipeline = VideoStreamingPipeline.shared
     
-    @State private var selectedNav: NavigationSection = .radar
+    @State private var activeTab: WindowTab = .notifications
+    @State private var isScreenMirroringActive: Bool = false
     @State private var isTargetedForDrop: Bool = false
-    @State private var quickBeamText: String = ""
-    @State private var copiedURLFeedback: Bool = false
+    @State private var quickTextInput: String = ""
+    @State private var expandedAppGroups: Set<String> = []
+    @State private var showClipboardSheet: Bool = false
     
-    public enum NavigationSection: String, CaseIterable, Identifiable {
-        case radar = "Radar & Peers"
-        case guestWeb = "Guest Web Portal"
-        case transfers = "Transfers Hub"
-        case continuity = "Continuity Suite"
-        case screenMirror = "Screen Mirroring"
-        case settings = "Settings & Storage"
+    public enum WindowTab: String, CaseIterable, Identifiable {
+        case notifications = "Notifications"
+        case mirror = "Screen Mirror"
+        case fileShare = "File Share"
+        case settings = "Settings"
         
         public var id: String { self.rawValue }
         
         public var iconName: String {
             switch self {
-            case .radar: return "antenna.radiowaves.left.and.right"
-            case .guestWeb: return "globe.badge.chevron.backward"
-            case .transfers: return "arrow.up.arrow.down.circle"
-            case .continuity: return "doc.on.clipboard"
-            case .screenMirror: return "display.2"
-            case .settings: return "gearshape"
+            case .notifications: return "bell.fill"
+            case .mirror: return "rectangle.fill"
+            case .fileShare: return "square.and.arrow.up.fill"
+            case .settings: return "gearshape.fill"
             }
         }
     }
@@ -39,692 +37,553 @@ public struct MainWindowView: View {
     public init() {}
     
     public var body: some View {
-        NavigationSplitView {
-            sidebarContent
-                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
-        } detail: {
-            detailContent
-                .frame(minWidth: 620, minHeight: 520)
-        }
-        .frame(minWidth: 860, minHeight: 600)
-        .toolbar {
-            ToolbarItemGroup(placement: .navigation) {
-                HStack(spacing: 8) {
-                    Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundColor(.accentColor)
+        ZStack {
+            // macOS Vibrant Translucent Background with subtle warm ambient aura matching reference
+            ambientGlassBackground
+            
+            VStack(spacing: 0) {
+                // Top Custom macOS Titlebar & Navigation Toolbar
+                customTopBar
+                
+                // Main Split Stage: Left Phone Bezel + Right Content
+                HStack(alignment: .top, spacing: 24) {
+                    // Left Column: Interactive Connected Phone Device Card
+                    leftPhoneCard
+                        .frame(width: 280)
                     
-                    Text("Waypoint")
-                        .font(.headline)
-                        .fontWeight(.bold)
+                    // Right Column: Dynamic Stage
+                    VStack(alignment: .leading, spacing: 0) {
+                        switch activeTab {
+                        case .notifications:
+                            notificationStreamView
+                        case .mirror:
+                            screenMirrorStageView
+                        case .fileShare:
+                            fileSharePortalView
+                        case .settings:
+                            settingsPortalView
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+            }
+        }
+        .frame(minWidth: 920, minHeight: 640)
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showClipboardSheet) {
+            clipboardSyncSheet
+        }
+    }
+    
+    // MARK: - Ambient Glass Background
+    
+    private var ambientGlassBackground: some View {
+        ZStack {
+            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+            
+            // Warm sunset aura inspired by the reference image
+            RadialGradient(
+                colors: [
+                    Color(red: 0.85, green: 0.45, blue: 0.25).opacity(0.18),
+                    Color(red: 0.65, green: 0.35, blue: 0.15).opacity(0.10),
+                    Color.clear
+                ],
+                center: .topTrailing,
+                startRadius: 80,
+                endRadius: 550
+            )
+            
+            Color.black.opacity(0.45)
+        }
+        .ignoresSafeArea()
+    }
+    
+    // MARK: - Custom Top Bar
+    
+    private var customTopBar: some View {
+        HStack {
+            // Left Device Name
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 8, height: 8)
+                    .shadow(color: .green.opacity(0.6), radius: 3)
+                
+                Text(connectedDeviceName)
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(.white)
             }
             
-            ToolbarItemGroup(placement: .primaryAction) {
-                HStack(spacing: 12) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(networkManager.isListening ? Color.green : Color.orange)
-                            .frame(width: 8, height: 8)
-                        Text(networkManager.isListening ? "Listening on Wi-Fi" : "Offline")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.06))
-                    .cornerRadius(12)
-                    
+            Spacer()
+            
+            // Center Segmented Capsule Toolbar
+            HStack(spacing: 4) {
+                ForEach(WindowTab.allCases) { tab in
                     Button(action: {
-                        NSWorkspace.shared.open(networkManager.receivedFolderURL)
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            activeTab = tab
+                            if tab == .mirror {
+                                isScreenMirroringActive = true
+                            }
+                        }
                     }) {
-                        Label("Downloads", systemImage: "folder")
+                        Image(systemName: tab.iconName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(activeTab == tab ? .white : .secondary)
+                            .frame(width: 34, height: 30)
+                            .background(activeTab == tab ? Color.white.opacity(0.2) : Color.clear)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .help("Open Waypoint Received folder in Finder")
+                    .buttonStyle(.plain)
                 }
             }
-        }
-    }
-    
-    // MARK: - Sidebar
-    
-    private var sidebarContent: some View {
-        List(NavigationSection.allCases, id: \.self, selection: $selectedNav) { section in
-            NavigationLink(value: section) {
-                Label {
-                    Text(section.rawValue)
-                        .font(.system(size: 13, weight: .medium))
-                } icon: {
-                    Image(systemName: section.iconName)
+            .padding(4)
+            .background(Color.black.opacity(0.35))
+            .cornerRadius(10)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+            )
+            
+            Spacer()
+            
+            // Right Quick Actions (Clipboard + Beacon counter)
+            HStack(spacing: 12) {
+                Button(action: { showClipboardSheet = true }) {
+                    Image(systemName: "doc.on.clipboard")
                         .font(.system(size: 14))
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(.white.opacity(0.85))
+                        .frame(width: 32, height: 30)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(8)
                 }
-                .badge(badgeForSection(section))
-            }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            sidebarFooter
-        }
-    }
-    
-    private func badgeForSection(_ section: NavigationSection) -> Int {
-        switch section {
-        case .radar:
-            return networkManager.discoveredPeers.count
-        case .transfers:
-            return networkManager.activeTransfers.filter { !$0.isCompleted }.count
-        default:
-            return 0
-        }
-    }
-    
-    private var sidebarFooter: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Divider()
-            HStack {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(networkManager.localDeviceName)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                    Text("IP: \(webServer.localIP)")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-    }
-    
-    // MARK: - Detail Content Switcher
-    
-    @ViewBuilder
-    private var detailContent: some View {
-        switch selectedNav {
-        case .radar:
-            radarPeersView
-        case .guestWeb:
-            guestWebPortalView
-        case .transfers:
-            transfersHubView
-        case .continuity:
-            continuitySuiteView
-        case .screenMirror:
-            screenMirrorView
-        case .settings:
-            settingsStorageView
-        }
-    }
-    
-    // MARK: - 1. Radar & Peers View
-    
-    private var radarPeersView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerBanner(
-                    title: "Nearby Radar & Local Peers",
-                    subtitle: "Zero-configuration Bonjour discovery on your Wi-Fi network. Beam files directly to any connected device."
-                )
+                .buttonStyle(.plain)
+                .help("Universal Clipboard")
                 
-                // Drag-and-drop beaming banner
-                ZStack {
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(
-                            isTargetedForDrop ? Color.accentColor : Color.secondary.opacity(0.3),
-                            style: StrokeStyle(lineWidth: 2, dash: [8, 6])
-                        )
-                        .background(isTargetedForDrop ? Color.accentColor.opacity(0.08) : Color.primary.opacity(0.02))
-                    
-                    VStack(spacing: 8) {
-                        Image(systemName: "arrow.down.doc.fill")
-                            .font(.system(size: 30))
-                            .foregroundColor(isTargetedForDrop ? .accentColor : .secondary)
-                        
-                        Text("Drop files here to beam to connected peers")
-                            .font(.system(size: 14, weight: .semibold))
-                        
-                        Text("Files are sent over direct encrypted TCP chunks or staged for guest web download")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                // Wireless Beacon with Notification Badge
+                ZStack(alignment: .topTrailing) {
+                    Button(action: { activeTab = .notifications }) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.system(size: 14))
+                            .foregroundColor(.white.opacity(0.85))
+                            .frame(width: 32, height: 30)
+                            .background(Color.white.opacity(0.08))
+                            .cornerRadius(8)
                     }
-                    .padding(24)
+                    .buttonStyle(.plain)
+                    
+                    if !continuity.notificationHistory.isEmpty {
+                        Text("\(continuity.notificationHistory.count)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Color.red)
+                            .clipShape(Capsule())
+                            .offset(x: 5, y: -4)
+                    }
                 }
-                .frame(height: 130)
-                .onDrop(of: [.fileURL], isTargeted: $isTargetedForDrop) { providers in
-                    handleDroppedFiles(providers)
-                    return true
-                }
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+    }
+    
+    private var connectedDeviceName: String {
+        if let first = networkManager.discoveredPeers.first(where: { $0.isConnected }) {
+            return first.name
+        }
+        return "Sameera's Pixel"
+    }
+    
+    // MARK: - Left Column: Phone Device Mockup Card
+    
+    private var leftPhoneCard: some View {
+        VStack(spacing: 16) {
+            // Realistic Phone Frame
+            ZStack {
+                // Phone Wallpaper / Gradient Screen
+                RoundedRectangle(cornerRadius: 32)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.10, green: 0.20, blue: 0.40),
+                                Color(red: 0.35, green: 0.55, blue: 0.75),
+                                Color(red: 0.95, green: 0.65, blue: 0.55),
+                                Color(red: 0.85, green: 0.35, blue: 0.35)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .overlay(
+                        // Subtle star / clouds effect
+                        VStack {
+                            Spacer()
+                            Circle()
+                                .fill(Color.white.opacity(0.08))
+                                .frame(width: 180, height: 180)
+                                .blur(radius: 20)
+                                .offset(y: 40)
+                        }
+                    )
                 
-                // Discovered peers grid
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Text("Discovered Devices (\(networkManager.discoveredPeers.count))")
-                            .font(.headline)
+                // If mirroring is active, render live video stream inside the phone frame
+                if isScreenMirroringActive && videoPipeline.isStreamActive {
+                    VideoDisplayView(displayLayer: videoPipeline.displayLayer)
+                        .clipShape(RoundedRectangle(cornerRadius: 32))
+                } else {
+                    // Default Ambient Phone UI matching reference screenshot
+                    VStack(spacing: 0) {
+                        // Top Status Bar (Battery + Volume)
+                        HStack {
+                            HStack(spacing: 5) {
+                                Image(systemName: "battery.100")
+                                    .font(.system(size: 11))
+                                Text("100%")
+                                    .font(.system(size: 10, weight: .semibold))
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .font(.system(size: 10))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.35))
+                            .clipShape(Capsule())
+                        }
+                        .padding(.top, 14)
                         
                         Spacer()
                         
-                        if networkManager.isBrowsing {
-                            HStack(spacing: 6) {
-                                ProgressView()
-                                    .scaleEffect(0.6)
-                                Text("Scanning...")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                        // Large Digital Clock
+                        VStack(spacing: -6) {
+                            Text(currentHourString)
+                                .font(.system(size: 54, weight: .medium, design: .rounded))
+                            Text(currentMinuteString)
+                                .font(.system(size: 54, weight: .medium, design: .rounded))
+                        }
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.25), radius: 6)
+                        
+                        Spacer()
+                        
+                        // Embedded Media Player Card
+                        mediaPlayerWidget
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 12)
+                        
+                        // Quick Action Buttons (Share + Mirror)
+                        HStack(spacing: 8) {
+                            Button(action: { activeTab = .fileShare }) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .frame(width: 48, height: 38)
+                                    .background(Color.white.opacity(0.25))
+                                    .cornerRadius(12)
                             }
-                        }
-                    }
-                    
-                    if networkManager.discoveredPeers.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "antenna.radiowaves.left.and.right")
-                                .font(.system(size: 36))
-                                .foregroundColor(.secondary.opacity(0.5))
-                            Text("No peers discovered yet on this Wi-Fi network.")
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.secondary)
-                            Text("Ensure other devices have Waypoint running or scan the Guest Web QR code.")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary.opacity(0.8))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(40)
-                        .background(Color.primary.opacity(0.02))
-                        .cornerRadius(12)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 260))], spacing: 14) {
-                            ForEach(networkManager.discoveredPeers) { peer in
-                                peerCard(peer)
+                            .buttonStyle(.plain)
+                            
+                            Button(action: {
+                                withAnimation {
+                                    activeTab = .mirror
+                                    isScreenMirroringActive.toggle()
+                                }
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "iphone")
+                                        .font(.system(size: 13))
+                                    Text("Mirror")
+                                        .font(.system(size: 12, weight: .semibold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
+                                .background(Color.white.opacity(0.25))
+                                .cornerRadius(12)
                             }
+                            .buttonStyle(.plain)
                         }
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 16)
                     }
                 }
             }
-            .padding(24)
+            .frame(height: 480)
+            .clipShape(RoundedRectangle(cornerRadius: 32))
+            .overlay(
+                RoundedRectangle(cornerRadius: 32)
+                    .stroke(Color.white.opacity(0.25), lineWidth: 1.5)
+            )
+            .shadow(color: .black.opacity(0.4), radius: 20, y: 10)
+            
+            // Disconnect Button
+            Button(action: {
+                if let first = networkManager.discoveredPeers.first(where: { $0.isConnected }) {
+                    networkManager.connect(to: first)
+                }
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                    Text("Disconnect")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .foregroundColor(.white.opacity(0.85))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.black.opacity(0.35))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
         }
     }
     
-    private func peerCard(_ peer: PeerDevice) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 12) {
-                Image(systemName: iconForPlatform(peer.platform))
-                    .font(.system(size: 24))
-                    .foregroundColor(.accentColor)
-                    .frame(width: 44, height: 44)
-                    .background(Color.accentColor.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+    private var mediaPlayerWidget: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "music.note")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.7))
                 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(peer.name)
-                        .font(.system(size: 14, weight: .semibold))
-                        .lineLimit(1)
-                    Text("\(peer.platform.rawValue) • \(peer.model)")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                Circle()
-                    .fill(peer.isConnected ? Color.green : Color.gray.opacity(0.4))
-                    .frame(width: 8, height: 8)
+                Text(continuity.currentMediaMetadata?.title ?? "Run")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
             }
             
-            Divider().opacity(0.4)
+            Text(continuity.currentMediaMetadata?.artist ?? "Becky Hill & Galantis")
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
             
+            // Controls
             HStack {
-                Button(action: {
-                    selectAndSendFiles(to: peer)
-                }) {
-                    Label("Send File", systemImage: "paperplane")
-                        .font(.system(size: 11, weight: .medium))
+                Spacer()
+                Button(action: { continuity.sendRemoteMediaCommand(.previousTrack) }) {
+                    Image(systemName: "backward.end.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+                .buttonStyle(.plain)
                 
                 Spacer()
                 
-                Button(action: {
-                    networkManager.connect(to: peer)
-                }) {
-                    Text(peer.isConnected ? "Connected" : "Connect")
-                        .font(.system(size: 11, weight: .medium))
+                Button(action: { continuity.sendRemoteMediaCommand(.playPauseToggle) }) {
+                    Image(systemName: (continuity.currentMediaMetadata?.isPlaying ?? true) ? "pause.fill" : "play.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Color(red: 0.10, green: 0.50, blue: 1.0))
+                        .clipShape(Circle())
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                Button(action: { continuity.sendRemoteMediaCommand(.nextTrack) }) {
+                    Image(systemName: "forward.end.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                Spacer()
             }
+            .padding(.top, 2)
         }
-        .padding(14)
-        .background(Color.primary.opacity(0.04))
-        .cornerRadius(12)
+        .padding(12)
+        .background(Color.black.opacity(0.40))
+        .cornerRadius(18)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
         )
     }
     
-    private func selectAndSendFiles(to peer: PeerDevice) {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        
-        if panel.runModal() == .OK {
-            for url in panel.urls {
-                networkManager.sendFile(url: url, to: peer)
-            }
-        }
+    private var currentHourString: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH"
+        return formatter.string(from: Date())
     }
     
-    // MARK: - 2. Guest Web Portal View
+    private var currentMinuteString: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "mm"
+        return formatter.string(from: Date())
+    }
     
-    private var guestWebPortalView: some View {
+    // MARK: - Right Column: Grouped Notification Stream View
+    
+    private var notificationStreamView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                headerBanner(
-                    title: "Guest Web Portal & QR Connect",
-                    subtitle: "No app required on guest devices. Windows PCs, Android phones, and iPhones can open your Mac's portal in their browser to download shared files and upload new ones."
-                )
+                // Group notifications by App Name
+                let grouped = Dictionary(grouping: continuity.notificationHistory, by: { $0.appName })
+                let sortedKeys = grouped.keys.sorted()
                 
-                // Server Control Bar
-                HStack(spacing: 16) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("HTTP Fallback Server Status")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(webServer.isRunning ? "Online at \(webServer.serverURLString)" : "Offline (stopped)")
-                            .font(.system(size: 11))
-                            .foregroundColor(webServer.isRunning ? .green : .secondary)
-                    }
-                    
-                    Spacer()
-                    
-                    Toggle("", isOn: Binding(
-                        get: { webServer.isRunning },
-                        set: { $0 ? webServer.start() : webServer.stop() }
-                    ))
-                    .toggleStyle(.switch)
-                }
-                .padding(14)
-                .background(Color.primary.opacity(0.04))
-                .cornerRadius(12)
-                
-                if webServer.isRunning {
-                    HStack(alignment: .top, spacing: 24) {
-                        // QR Code Card
-                        VStack(spacing: 12) {
-                            if let qr = webServer.qrCodeImage {
-                                Image(nsImage: qr)
-                                    .interpolation(.none)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 180, height: 180)
-                                    .padding(10)
-                                    .background(Color.white)
-                                    .cornerRadius(14)
-                                    .shadow(color: .black.opacity(0.15), radius: 8)
-                            }
-                            
-                            Text("Scan with phone camera to connect")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                            
-                            HStack {
-                                Text(webServer.serverURLString)
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .lineLimit(1)
-                                
-                                Button(action: {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(webServer.serverURLString, forType: .string)
-                                    copiedURLFeedback = true
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { copiedURLFeedback = false }
-                                }) {
-                                    Image(systemName: copiedURLFeedback ? "checkmark" : "doc.on.doc")
-                                }
-                                .buttonStyle(.plain)
-                                
-                                Button(action: {
-                                    if let url = URL(string: webServer.serverURLString) {
-                                        NSWorkspace.shared.open(url)
-                                    }
-                                }) {
-                                    Image(systemName: "safari")
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(8)
-                            .background(Color.primary.opacity(0.06))
-                            .cornerRadius(8)
-                        }
-                        .frame(width: 240)
-                        .padding(16)
-                        .background(Color.primary.opacity(0.03))
-                        .cornerRadius(14)
-                        
-                        // Staged Files for Guests
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack {
-                                Text("Files Shared for Guest Download (\(webServer.stagedFiles.count))")
-                                    .font(.system(size: 13, weight: .semibold))
-                                
-                                Spacer()
-                                
-                                Button(action: stageFilesForGuest) {
-                                    Label("Add Files", systemImage: "plus")
-                                        .font(.system(size: 11))
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                            }
-                            
-                            if webServer.stagedFiles.isEmpty {
-                                VStack(spacing: 8) {
-                                    Image(systemName: "tray")
-                                        .font(.system(size: 28))
-                                        .foregroundColor(.secondary.opacity(0.6))
-                                    Text("No files currently staged for guests.")
-                                        .font(.system(size: 12))
-                                        .foregroundColor(.secondary)
-                                    Text("Click 'Add Files' or drop files into Waypoint to make them available for download.")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary.opacity(0.8))
-                                        .multilineTextAlignment(.center)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(30)
-                                .background(Color.primary.opacity(0.02))
-                                .cornerRadius(10)
-                            } else {
-                                VStack(spacing: 6) {
-                                    ForEach(webServer.stagedFiles, id: \.self) { url in
-                                        HStack {
-                                            Image(systemName: "doc.fill")
-                                                .foregroundColor(.accentColor)
-                                            Text(url.lastPathComponent)
-                                                .font(.system(size: 12, weight: .medium))
-                                                .lineLimit(1)
-                                            Spacer()
-                                            Button(action: { webServer.removeStagedFile(url: url) }) {
-                                                Image(systemName: "xmark.circle")
-                                                    .font(.system(size: 12))
-                                                    .foregroundColor(.secondary)
-                                            }
-                                            .buttonStyle(.plain)
-                                        }
-                                        .padding(8)
-                                        .background(Color.primary.opacity(0.04))
-                                        .cornerRadius(8)
-                                    }
-                                }
-                            }
-                            
-                            // Guest Upload Instruction
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Guest Uploads Enabled", systemImage: "arrow.up.circle")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.accentColor)
-                                Text("Guests can tap 'Choose Files' or drag photos/documents on the web portal. All uploaded files stream directly to your 'Waypoint Received' folder.")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(12)
-                            .background(Color.accentColor.opacity(0.08))
-                            .cornerRadius(10)
-                        }
-                    }
-                }
-            }
-            .padding(24)
-        }
-    }
-    
-    private func stageFilesForGuest() {
-        let panel = NSOpenPanel()
-        panel.allowsMultipleSelection = true
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        if panel.runModal() == .OK {
-            for url in panel.urls {
-                webServer.stageFile(url: url)
-            }
-        }
-    }
-    
-    // MARK: - 3. Transfers Hub View
-    
-    private var transfersHubView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerBanner(
-                    title: "Transfers Hub",
-                    subtitle: "Track live high-speed file transfers across local sockets and incoming uploads from guest web browsers."
-                )
-                
-                HStack {
-                    Text("Transfer Queue (\(networkManager.activeTransfers.count))")
-                        .font(.headline)
-                    Spacer()
-                    Button("Open Received Folder") {
-                        NSWorkspace.shared.open(networkManager.receivedFolderURL)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                
-                if networkManager.activeTransfers.isEmpty {
+                if sortedKeys.isEmpty {
                     VStack(spacing: 12) {
-                        Image(systemName: "arrow.up.arrow.down.circle")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary.opacity(0.5))
-                        Text("No active or recent file transfers.")
-                            .font(.system(size: 13, weight: .medium))
+                        Image(systemName: "bell.slash")
+                            .font(.system(size: 36))
+                            .foregroundColor(.secondary)
+                        Text("No notifications received yet")
+                            .font(.system(size: 14, weight: .medium))
                             .foregroundColor(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(50)
-                    .background(Color.primary.opacity(0.02))
-                    .cornerRadius(12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(60)
                 } else {
-                    VStack(spacing: 10) {
-                        ForEach(networkManager.activeTransfers) { transfer in
-                            transferRow(transfer)
-                        }
-                    }
-                }
-            }
-            .padding(24)
-        }
-    }
-    
-    private func transferRow(_ transfer: FileTransferProgress) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Image(systemName: transfer.isOutbound ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                    .font(.system(size: 20))
-                    .foregroundColor(transfer.isOutbound ? .blue : .green)
-                
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(transfer.fileName)
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("\(transfer.isOutbound ? "Sending to" : "Received from") \(transfer.targetDeviceName)")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                if transfer.isCompleted {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Completed")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.green)
-                    }
-                } else {
-                    Text(transfer.formattedSpeed)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-            }
-            
-            ProgressView(value: transfer.fractionCompleted)
-                .progressViewStyle(.linear)
-                .tint(transfer.isCompleted ? .green : .accentColor)
-        }
-        .padding(14)
-        .background(Color.primary.opacity(0.04))
-        .cornerRadius(10)
-    }
-    
-    // MARK: - 4. Continuity Suite View
-    
-    private var continuitySuiteView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                headerBanner(
-                    title: "Continuity Suite",
-                    subtitle: "Universal clipboard synchronization, Android notification mirroring, and remote media player controls."
-                )
-                
-                // Universal Clipboard Box
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label("Universal Clipboard", systemImage: "doc.on.clipboard")
-                            .font(.system(size: 14, weight: .semibold))
-                        Spacer()
-                        Toggle("", isOn: $continuity.isClipboardSyncEnabled)
-                            .toggleStyle(.switch)
-                    }
-                    
-                    Text("Any text copied on your Mac automatically syncs across connected devices, and text copied on your phone updates your Mac pasteboard silently.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    
-                    if !continuity.latestClipboardSnippet.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Latest Synced Text:")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                            Text(continuity.latestClipboardSnippet)
-                                .font(.system(size: 12, design: .monospaced))
-                                .padding(10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(Color.primary.opacity(0.04))
-                                .cornerRadius(8)
-                        }
-                    }
-                }
-                .padding(16)
-                .background(Color.primary.opacity(0.03))
-                .cornerRadius(12)
-                
-                // Mirrored Notifications Box
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label("Notification Relay Receiver", systemImage: "bell.badge")
-                            .font(.system(size: 14, weight: .semibold))
-                        Spacer()
-                        Toggle("", isOn: $continuity.isNotificationRelayEnabled)
-                            .toggleStyle(.switch)
-                    }
-                    
-                    Text("Incoming Android notifications mirror natively to macOS Notification Center with support for quick replies and notification actions.")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    
-                    if let notif = continuity.latestNotification {
-                        HStack(spacing: 12) {
-                            Image(systemName: "app.badge.fill")
-                                .font(.system(size: 24))
-                                .foregroundColor(.accentColor)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(notif.appName) • \(notif.title)")
-                                    .font(.system(size: 12, weight: .bold))
-                                Text(notif.text)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
+                    ForEach(sortedKeys, id: \.self) { appKey in
+                        if let items = grouped[appKey], let first = items.first {
+                            VStack(alignment: .leading, spacing: 8) {
+                                // Group Header
+                                Text(appKey)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white.opacity(0.6))
+                                    .padding(.leading, 4)
+                                
+                                // Primary Card
+                                notificationCard(first)
+                                
+                                // Show More button if more than 1 notification for this app
+                                if items.count > 1 {
+                                    let isExpanded = expandedAppGroups.contains(appKey)
+                                    
+                                    if isExpanded {
+                                        ForEach(items.dropFirst()) { notif in
+                                            notificationCard(notif)
+                                        }
+                                    }
+                                    
+                                    Button(action: {
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            if isExpanded {
+                                                expandedAppGroups.remove(appKey)
+                                            } else {
+                                                expandedAppGroups.insert(appKey)
+                                            }
+                                        }
+                                    }) {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                                .font(.system(size: 10, weight: .bold))
+                                            Text(isExpanded ? "Show Less" : "Show \(items.count - 1) More")
+                                                .font(.system(size: 11, weight: .medium))
+                                        }
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.leading, 12)
+                                        .padding(.top, 2)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color.primary.opacity(0.04))
-                        .cornerRadius(8)
                     }
                 }
-                .padding(16)
-                .background(Color.primary.opacity(0.03))
-                .cornerRadius(12)
-                
-                // Media Control Bridge Box
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Label("Media Control Bridge", systemImage: "playpause.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                        Spacer()
-                        Toggle("", isOn: $continuity.isMediaBridgeEnabled)
-                            .toggleStyle(.switch)
-                    }
-                    
-                    HStack(spacing: 20) {
-                        Button(action: { continuity.sendRemoteMediaCommand(.previousTrack) }) {
-                            Image(systemName: "backward.fill")
-                        }
-                        Button(action: { continuity.sendRemoteMediaCommand(.playPauseToggle) }) {
-                            Image(systemName: "playpause.fill")
-                        }
-                        Button(action: { continuity.sendRemoteMediaCommand(.nextTrack) }) {
-                            Image(systemName: "forward.fill")
-                        }
-                        
-                        Divider().frame(height: 20)
-                        
-                        Button(action: { continuity.sendRemoteMediaCommand(.volumeDown) }) {
-                            Image(systemName: "speaker.wave.1.fill")
-                        }
-                        Button(action: { continuity.sendRemoteMediaCommand(.volumeUp) }) {
-                            Image(systemName: "speaker.wave.3.fill")
-                        }
-                    }
-                    .font(.system(size: 16))
-                    .buttonStyle(.bordered)
-                    .controlSize(.regular)
-                }
-                .padding(16)
-                .background(Color.primary.opacity(0.03))
-                .cornerRadius(12)
             }
-            .padding(24)
+            .padding(.top, 8)
         }
     }
     
-    // MARK: - 5. Screen Mirroring View
+    private func notificationCard(_ item: NotificationRelayPayload) -> some View {
+        HStack(spacing: 14) {
+            // Brand Icon Circle
+            brandIconView(appName: item.appName, packageName: item.packageName)
+            
+            // Text Content
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.title)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                
+                Text(item.text)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.75))
+                    .lineLimit(2)
+            }
+            
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(
+            Color.black.opacity(0.35)
+        )
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+    }
     
-    private var screenMirrorView: some View {
+    @ViewBuilder
+    private func brandIconView(appName: String, packageName: String) -> some View {
+        let name = appName.lowercased()
+        if name.contains("facebook") {
+            ZStack {
+                Circle().fill(Color(red: 0.09, green: 0.47, blue: 0.95))
+                Text("f")
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .offset(x: 2, y: 1)
+            }
+            .frame(width: 36, height: 36)
+        } else if name.contains("github") {
+            ZStack {
+                Circle().fill(Color(red: 0.12, green: 0.12, blue: 0.15))
+                Image(systemName: "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 36, height: 36)
+        } else if name.contains("gmail") {
+            ZStack {
+                Circle().fill(Color.white)
+                Image(systemName: "envelope.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(Color(red: 0.92, green: 0.26, blue: 0.21))
+            }
+            .frame(width: 36, height: 36)
+        } else if name.contains("whatsapp") {
+            ZStack {
+                Circle().fill(Color(red: 0.15, green: 0.78, blue: 0.35))
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 36, height: 36)
+        } else {
+            ZStack {
+                Circle().fill(Color.accentColor)
+                Image(systemName: "bell.fill")
+                    .font(.system(size: 15))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 36, height: 36)
+        }
+    }
+    
+    // MARK: - Screen Mirror Full Stage View
+    
+    private var screenMirrorStageView: some View {
         VStack(spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Hardware-Accelerated Screen Mirroring")
-                        .font(.headline)
-                    Text("Direct AVC/H.264 stream rendered via AVSampleBufferDisplayLayer with zero latency")
-                        .font(.subheadline)
+                    Text("Display Mirroring")
+                        .font(.title3)
+                        .fontWeight(.bold)
+                    Text("Low-latency H.264 stream rendered with VideoToolbox hardware acceleration")
+                        .font(.caption)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                
-                if videoPipeline.isStreamActive {
-                    HStack(spacing: 6) {
-                        Circle().fill(Color.green).frame(width: 8, height: 8)
-                        Text("\(Int(videoPipeline.currentResolution.width))x\(Int(videoPipeline.currentResolution.height))")
-                            .font(.system(size: 11, design: .monospaced))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.12))
-                    .cornerRadius(8)
-                }
-                
                 Button("Reset Stream") {
                     videoPipeline.resetStream()
                 }
@@ -732,135 +591,248 @@ public struct MainWindowView: View {
                 .controlSize(.small)
             }
             
-            // Video Display Canvas
             ZStack {
-                Color.black.cornerRadius(12)
+                Color.black.cornerRadius(18)
                 
                 VideoDisplayView(displayLayer: videoPipeline.displayLayer)
-                    .cornerRadius(12)
+                    .cornerRadius(18)
                 
                 if !videoPipeline.isStreamActive {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 12) {
                         Image(systemName: "display.trianglebadge.exclamationmark")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary.opacity(0.5))
-                        Text("Waiting for incoming video stream...")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 44))
+                            .foregroundColor(.secondary.opacity(0.6))
+                        Text("Ready to Mirror")
+                            .font(.headline)
+                        Text("Start screen sharing from your phone or companion device to stream to this Mac.")
+                            .font(.caption)
                             .foregroundColor(.secondary)
-                        Text("Connect a companion device running the Waypoint Screen Mirror module")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 32)
                     }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 1)
+            )
         }
-        .padding(24)
+        .padding(.top, 8)
     }
     
-    // MARK: - 6. Settings & Storage View
+    // MARK: - File Share & Guest Web Portal View
     
-    private var settingsStorageView: some View {
+    private var fileSharePortalView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                headerBanner(
-                    title: "Settings & Local Storage",
-                    subtitle: "Configure designated download paths, network ports, and discovery parameters."
-                )
-                
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Storage Location")
-                        .font(.system(size: 13, weight: .semibold))
+                // Dropzone
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .strokeBorder(
+                            isTargetedForDrop ? Color.accentColor : Color.white.opacity(0.2),
+                            style: StrokeStyle(lineWidth: 2, dash: [8, 6])
+                        )
+                        .background(isTargetedForDrop ? Color.accentColor.opacity(0.1) : Color.black.opacity(0.25))
                     
+                    VStack(spacing: 8) {
+                        Image(systemName: "arrow.down.doc.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(isTargetedForDrop ? .accentColor : .secondary)
+                        Text("Drop files here to beam to \(connectedDeviceName)")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("Also staged for guest mobile download")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(20)
+                }
+                .frame(height: 120)
+                .onDrop(of: [.fileURL], isTargeted: $isTargetedForDrop) { providers in
+                    handleDroppedFiles(providers)
+                    return true
+                }
+                
+                // Guest Web Connect Box
+                HStack(alignment: .center, spacing: 20) {
+                    if let qr = webServer.qrCodeImage {
+                        Image(nsImage: qr)
+                            .interpolation(.none)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 130, height: 130)
+                            .padding(8)
+                            .background(Color.white)
+                            .cornerRadius(12)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Guest Web Fallback")
+                            .font(.headline)
+                        Text("Scan this QR code with any iPhone, Android, or PC camera to upload files or download files from your Mac.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        HStack {
+                            Text(webServer.serverURLString)
+                                .font(.system(size: 11, design: .monospaced))
+                            
+                            Button(action: {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(webServer.serverURLString, forType: .string)
+                            }) {
+                                Image(systemName: "doc.on.doc")
+                            }
+                            .buttonStyle(.plain)
+                            
+                            Button(action: {
+                                if let url = URL(string: webServer.serverURLString) {
+                                    NSWorkspace.shared.open(url)
+                                }
+                            }) {
+                                Image(systemName: "safari")
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(6)
+                        .background(Color.white.opacity(0.08))
+                        .cornerRadius(6)
+                    }
+                }
+                .padding(16)
+                .background(Color.black.opacity(0.3))
+                .cornerRadius(16)
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08), lineWidth: 1))
+                
+                // Active / Recent Transfers
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Recent Transfers (\(networkManager.activeTransfers.count))")
+                        .font(.headline)
+                    
+                    if networkManager.activeTransfers.isEmpty {
+                        Text("No transfers recorded yet.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(networkManager.activeTransfers) { transfer in
+                            HStack {
+                                Image(systemName: transfer.isOutbound ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                                    .foregroundColor(transfer.isOutbound ? .blue : .green)
+                                
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(transfer.fileName)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("\(transfer.isOutbound ? "Sent to" : "Received from") \(transfer.targetDeviceName)")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                if transfer.isCompleted {
+                                    Text("✓ Complete")
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(.green)
+                                } else {
+                                    Text(transfer.formattedSpeed)
+                                        .font(.system(size: 10, design: .monospaced))
+                                }
+                            }
+                            .padding(10)
+                            .background(Color.black.opacity(0.25))
+                            .cornerRadius(10)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+    
+    // MARK: - Settings Portal View
+    
+    private var settingsPortalView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                Text("Settings & Continuity")
+                    .font(.title3)
+                    .fontWeight(.bold)
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    Toggle("Universal Clipboard Sync", isOn: $continuity.isClipboardSyncEnabled)
+                    Toggle("Notification Relay Receiver", isOn: $continuity.isNotificationRelayEnabled)
+                    Toggle("Media Control Bridge", isOn: $continuity.isMediaBridgeEnabled)
+                }
+                .padding(16)
+                .background(Color.black.opacity(0.3))
+                .cornerRadius(14)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Received Folder Path")
+                        .font(.headline)
                     HStack {
-                        Image(systemName: "folder.fill")
-                            .foregroundColor(.accentColor)
                         Text(networkManager.receivedFolderURL.path)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
                         Spacer()
-                        Button("Change...") {
-                            let panel = NSOpenPanel()
-                            panel.canChooseFiles = false
-                            panel.canChooseDirectories = true
-                            panel.canCreateDirectories = true
-                            if panel.runModal() == .OK, let selectedURL = panel.url {
-                                networkManager.updateReceivedFolder(url: selectedURL)
-                            }
+                        Button("Open") {
+                            NSWorkspace.shared.open(networkManager.receivedFolderURL)
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     }
-                    .padding(12)
-                    .background(Color.primary.opacity(0.04))
-                    .cornerRadius(10)
                 }
                 .padding(16)
-                .background(Color.primary.opacity(0.03))
-                .cornerRadius(12)
-                
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Network Configuration")
-                        .font(.system(size: 13, weight: .semibold))
-                    
-                    HStack {
-                        Text("Bonjour Service Type:")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("_waypoint._tcp")
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    Divider().opacity(0.4)
-                    HStack {
-                        Text("TCP P2P Port:")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(P2PNetworkManager.defaultPort)")
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    Divider().opacity(0.4)
-                    HStack {
-                        Text("HTTP Guest Portal Port:")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(webServer.port)")
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                }
-                .padding(16)
-                .background(Color.primary.opacity(0.03))
-                .cornerRadius(12)
+                .background(Color.black.opacity(0.3))
+                .cornerRadius(14)
             }
-            .padding(24)
+            .padding(.top, 8)
         }
     }
     
-    // MARK: - Helpers
+    // MARK: - Clipboard Quick Sheet
     
-    private func headerBanner(title: String, subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.title2)
-                .fontWeight(.bold)
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
+    private var clipboardSyncSheet: some View {
+        VStack(spacing: 16) {
+            HStack {
+                Label("Universal Clipboard", systemImage: "doc.on.clipboard")
+                    .font(.headline)
+                Spacer()
+                Button("Done") { showClipboardSheet = false }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            
+            if !continuity.latestClipboardSnippet.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Latest Synced Text:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text(continuity.latestClipboardSnippet)
+                        .font(.system(size: 12, design: .monospaced))
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color.white.opacity(0.06))
+                        .cornerRadius(10)
+                    
+                    Button("Copy to Mac Clipboard") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(continuity.latestClipboardSnippet, forType: .string)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+            } else {
+                Text("No text synced yet. Copy text on your phone to see it appear here!")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
         }
+        .padding(20)
+        .frame(width: 420, height: 260)
     }
     
-    private func iconForPlatform(_ platform: DevicePlatform) -> String {
-        switch platform {
-        case .macOS: return "laptopcomputer"
-        case .iOS: return "iphone"
-        case .android: return "phone.badge.waveform"
-        case .windows: return "pc"
-        case .linux: return "terminal"
-        case .web: return "globe"
-        }
-    }
+    // MARK: - Drop Handling
     
     private func handleDroppedFiles(_ providers: [NSItemProvider]) {
         for provider in providers {
@@ -876,6 +848,11 @@ public struct MainWindowView: View {
             }
         }
     }
+}
+
+// Model conformance for ForEach
+extension NotificationRelayPayload: Identifiable {
+    public var id: String { notificationId }
 }
 
 // NSView wrapper to host AVSampleBufferDisplayLayer

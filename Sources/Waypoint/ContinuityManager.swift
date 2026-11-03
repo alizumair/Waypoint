@@ -16,6 +16,7 @@ public final class ContinuityManager: NSObject, ObservableObject, UNUserNotifica
     
     @Published public private(set) var latestClipboardSnippet: String = ""
     @Published public private(set) var latestNotification: NotificationRelayPayload?
+    @Published public var notificationHistory: [NotificationRelayPayload] = []
     @Published public private(set) var currentMediaMetadata: MediaMetadataPayload?
     
     // Deduplication tracking
@@ -29,6 +30,53 @@ public final class ContinuityManager: NSObject, ObservableObject, UNUserNotifica
         setupNotificationRelay()
         setupClipboardWatcher()
         bindP2PCallbacks()
+        seedInitialSampleData()
+    }
+    
+    private func seedInitialSampleData() {
+        self.notificationHistory = [
+            NotificationRelayPayload(
+                notificationId: "fb_1",
+                packageName: "com.facebook.katana",
+                appName: "Facebook",
+                title: "Facebook - Lisa Park",
+                text: "shared a memory with you",
+                postTime: Date().timeIntervalSince1970 - 120
+            ),
+            NotificationRelayPayload(
+                notificationId: "gh_1",
+                packageName: "com.github.android",
+                appName: "GitHub",
+                title: "GitHub - GitHub",
+                text: "New release v2.1.0 is available",
+                postTime: Date().timeIntervalSince1970 - 300
+            ),
+            NotificationRelayPayload(
+                notificationId: "gmail_1",
+                packageName: "com.google.android.gm",
+                appName: "Gmail",
+                title: "Gmail - LinkedIn",
+                text: "Meeting agenda for tomorrow's call",
+                postTime: Date().timeIntervalSince1970 - 600
+            ),
+            NotificationRelayPayload(
+                notificationId: "wa_1",
+                packageName: "com.whatsapp",
+                appName: "WhatsApp",
+                title: "WhatsApp - Sarah Williams",
+                text: "Did you see the news about the project?",
+                postTime: Date().timeIntervalSince1970 - 900
+            )
+        ]
+        
+        self.currentMediaMetadata = MediaMetadataPayload(
+            title: "Run",
+            artist: "Becky Hill & Galantis",
+            album: "Only Honest on the Weekend",
+            durationSeconds: 180,
+            positionSeconds: 45,
+            isPlaying: true
+        )
     }
     
     // MARK: - P2P Network Wiring
@@ -125,6 +173,8 @@ public final class ContinuityManager: NSObject, ObservableObject, UNUserNotifica
     private func handleIncomingNotification(_ payload: NotificationRelayPayload) {
         guard isNotificationRelayEnabled else { return }
         self.latestNotification = payload
+        self.notificationHistory.removeAll { $0.notificationId == payload.notificationId }
+        self.notificationHistory.insert(payload, at: 0)
         
         let content = UNMutableNotificationContent()
         content.title = "\(payload.appName)"
