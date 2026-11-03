@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>Waypoint</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.alizumair.Waypoint</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Waypoint</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    
+    <!-- Hide from Dock: Pure menu-bar app -->
+    <key>LSUIElement</key>
+    <true/>
+    
+    <!-- Local Network Privacy Permissions -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Waypoint connects directly to your phones, tablets, and computers over local Wi-Fi to sync clipboard, beam files, and mirror notifications without cloud servers.</string>
+    
+    <!-- Bonjour Services -->
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_waypoint._tcp</string>
+    </array>
+    
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Waypoint coordinates playback control with macOS media players.</string>
+</dict>
+</plist>
